@@ -233,6 +233,90 @@ test("leader is not elevated when it only loses at weak intent", () => {
   assert.equal(r.headline.competitorName, "Garmin");
 });
 
+// Regression for the head-to-head flaw: a comparison query whose TEXT pits two
+// RIVALS against each other and never names the client ("is Whoop or Oura Ring
+// better?") is structurally unable to return the client — its absence is a
+// non-result, not a loss. It must never seed the lead/table or the headline count.
+function recoveryProfile(): CompanyProfile {
+  const p = wearableProfile();
+  p.competitors = [
+    { name: "Whoop", aliases: [], confirmed: true },
+    { name: "Garmin", aliases: [], confirmed: true },
+    { name: "Oura", aliases: ["Oura Ring"], confirmed: true },
+  ];
+  return p;
+}
+
+test("a rival-vs-rival head-to-head that never names the client is excluded", () => {
+  const report = baseReport({
+    client_name: "Fort",
+    competitors: ["Whoop", "Garmin", "Oura"],
+    engines: ["perplexity", "openai"],
+    scorecard: { ...baseReport().scorecard, top_competitor: "Whoop" },
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "openai", competitor: "Whoop" },
+      // Highest-scoring row (comparison/perplexity) — but a closed head-to-head
+      // between Whoop and Oura that never names Fort. Without the fix it would lead.
+      { query_id: "q2", intent: "comparison", engine_name: "perplexity", competitor: "Whoop" },
+    ],
+  });
+  const ans: AnswerRecord[] = [
+    { query_id: "q1", intent: "category", prompt: "best recovery wearable?", engine_name: "openai",
+      run_index: 0, response: "Whoop leads.", citations: [], timestamp: "t" },
+    { query_id: "q2", intent: "comparison", prompt: "is Whoop or Oura Ring better for monitoring workout recovery?",
+      engine_name: "perplexity", run_index: 0, response: "Whoop edges out Oura.", citations: [], timestamp: "t" },
+  ];
+  const r = selectFindings(recoveryProfile(), report, ans);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  // q2 never seeds the lead or the table...
+  assert.notEqual(r.lead.queryId, "q2");
+  assert.ok(!r.table.some((f) => f.queryId === "q2"));
+  // ...and it's dropped from the headline denominator (only q1 counts).
+  assert.equal(r.headline.n, 1);
+});
+
+// The guard against over-filtering: a head-to-head that DOES name the client
+// ("Fort vs Whoop or Oura") is a real loss — the client was in the question and
+// still lost — so it is kept.
+test("a head-to-head that names the client is kept (that absence is real)", () => {
+  const report = baseReport({
+    client_name: "Fort",
+    competitors: ["Whoop", "Garmin", "Oura"],
+    scorecard: { ...baseReport().scorecard, top_competitor: "Whoop" },
+    losing_queries: [
+      { query_id: "q1", intent: "comparison", engine_name: "perplexity", competitor: "Whoop" },
+    ],
+  });
+  const ans: AnswerRecord[] = [
+    { query_id: "q1", intent: "comparison", prompt: "Fort vs Whoop or Oura Ring for recovery?",
+      engine_name: "perplexity", run_index: 0, response: "Whoop is the better pick.", citations: [], timestamp: "t" },
+  ];
+  const r = selectFindings(recoveryProfile(), report, ans);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.lead.queryId, "q1");
+  assert.equal(r.headline.n, 1);
+});
+
+// When EVERY losing query is a closed head-to-head, there's nothing fair to print —
+// a clean refusal, not a teaser built on non-results.
+test("all losing queries are rival-vs-rival head-to-heads -> clean refusal", () => {
+  const report = baseReport({
+    client_name: "Fort",
+    competitors: ["Whoop", "Garmin", "Oura"],
+    losing_queries: [
+      { query_id: "q1", intent: "comparison", engine_name: "perplexity", competitor: "Whoop" },
+    ],
+  });
+  const ans: AnswerRecord[] = [
+    { query_id: "q1", intent: "comparison", prompt: "Whoop vs Oura Ring for sleep tracking?",
+      engine_name: "perplexity", run_index: 0, response: "Whoop wins.", citations: [], timestamp: "t" },
+  ];
+  const r = selectFindings(recoveryProfile(), report, ans);
+  assert.equal(r.ok, false);
+});
+
 test("regex detection mode is refused", () => {
   const r = selectFindings(profile(), baseReport({ detection: "regex" }), answers());
   assert.equal(r.ok, false);
