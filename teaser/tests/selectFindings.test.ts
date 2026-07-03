@@ -154,6 +154,85 @@ test("table backfills from one engine when no distinct engine is available", () 
   assert.equal(r.table.length, 2);
 });
 
+// Unification guardrail (the fort.cx bug): the headline named the category leader
+// (top_competitor) while the proof body named the lead query's rival. Now ONE hero
+// competitor drives every surface. Here Garmin has the single highest-intent loss,
+// but the category leader Whoop ALSO loses at meaningful intent -> Whoop is hero,
+// and lead/table/count all name Whoop, not Garmin.
+function wearableProfile(): CompanyProfile {
+  const p = profile();
+  p.name = "Fort";
+  p.competitors = [
+    { name: "Whoop", aliases: [], confirmed: true },
+    { name: "Garmin", aliases: [], confirmed: true },
+  ];
+  return p;
+}
+
+test("hero competitor unifies every surface on the elevated category leader", () => {
+  const report = baseReport({
+    client_name: "Fort",
+    competitors: ["Whoop", "Garmin"],
+    engines: ["perplexity", "openai", "gemini"],
+    scorecard: { ...baseReport().scorecard, top_competitor: "Whoop" },
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "perplexity", competitor: "Garmin" }, // highest leadScore, but a distractor
+      { query_id: "q2", intent: "category", engine_name: "openai", competitor: "Whoop" }, // leader, meaningful intent -> elevates
+      { query_id: "q3", intent: "comparison", engine_name: "gemini", competitor: "Whoop" },
+      { query_id: "q4", intent: "problem_aware", engine_name: "perplexity", competitor: "Whoop" },
+    ],
+  });
+  const mk = (id: string, engine: string, intent: string, resp: string): AnswerRecord => ({
+    query_id: id, intent: intent as AnswerRecord["intent"], prompt: `${id}?`,
+    engine_name: engine, run_index: 0, response: resp, citations: [], timestamp: "t",
+  });
+  const ans = [
+    mk("q1", "perplexity", "category", "Garmin is the pick."),
+    mk("q2", "openai", "category", "Whoop leads."),
+    mk("q3", "gemini", "comparison", "Whoop wins."),
+    mk("q4", "perplexity", "problem_aware", "Whoop is best."),
+  ];
+  const r = selectFindings(wearableProfile(), report, ans);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  // Every surface names Whoop — the H1 (heroCompetitor) can't diverge from the body.
+  assert.equal(r.heroCompetitor, "Whoop");
+  assert.equal(r.lead.competitor, "Whoop");
+  assert.equal(r.headline.competitorName, "Whoop");
+  for (const f of r.table) assert.equal(f.competitor, "Whoop");
+  // The lead is the strongest WHOOP loss (q2), not the higher-scored Garmin loss (q1).
+  assert.equal(r.lead.queryId, "q2");
+  assert.ok(!r.table.some((f) => f.queryId === "q1"));
+  // ...and it's still cross-engine: lead + table span three distinct engines.
+  const engines = new Set([r.lead.engineName, ...r.table.map((f) => f.engineName)]);
+  assert.equal(engines.size, 3);
+});
+
+// The mirror case: the category leader loses only on a WEAK-intent query (brand),
+// so it is NOT elevated — the teaser headlines the rival it can actually prove
+// with a strong loss (Garmin), rather than naming Whoop with no strong evidence.
+test("leader is not elevated when it only loses at weak intent", () => {
+  const report = baseReport({
+    client_name: "Fort",
+    competitors: ["Whoop", "Garmin"],
+    scorecard: { ...baseReport().scorecard, top_competitor: "Whoop" },
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "perplexity", competitor: "Garmin" },
+      { query_id: "q2", intent: "brand", engine_name: "openai", competitor: "Whoop" }, // weak intent
+    ],
+  });
+  const mk = (id: string, engine: string, intent: string): AnswerRecord => ({
+    query_id: id, intent: intent as AnswerRecord["intent"], prompt: `${id}?`,
+    engine_name: engine, run_index: 0, response: "rival wins.", citations: [], timestamp: "t",
+  });
+  const r = selectFindings(wearableProfile(), report, [mk("q1", "perplexity", "category"), mk("q2", "openai", "brand")]);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.heroCompetitor, "Garmin");
+  assert.equal(r.lead.competitor, "Garmin");
+  assert.equal(r.headline.competitorName, "Garmin");
+});
+
 test("regex detection mode is refused", () => {
   const r = selectFindings(profile(), baseReport({ detection: "regex" }), answers());
   assert.equal(r.ok, false);

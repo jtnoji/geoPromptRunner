@@ -308,7 +308,7 @@ export function renderTeaserHtml(t: TeaserDraft, edits: TeaserEdits = {}): strin
       <section class="section">
         <div class="kicker">Who AI recommends in your category</div>
         <p class="caption legend">Each bar is the share of the ${h.n} buyer queries where AI named that brand in its answer.</p>
-        ${visibilityChart(t.report.leaderboard, t.report.scorecard.top_competitor)}
+        ${visibilityChart(t.report.leaderboard, t.heroCompetitor)}
         <p class="caption">${escapeHtml(clientAppearanceLine(t))}</p>
       </section>
       ${whySection}

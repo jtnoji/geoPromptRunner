@@ -74,6 +74,7 @@ function savedDraft(): TeaserDraft {
     category: "budgeting app",
     runDate: "2026-06-20",
     heroEngine: "perplexity",
+    heroCompetitor: "Stale",
     headline: "OLD HEADLINE FROM A PREVIOUS VERSION",
     leadSentence: "old lead",
     headlineNumber: {

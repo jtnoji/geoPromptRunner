@@ -76,6 +76,12 @@ export interface TeaserDraft {
   category: string;
   runDate: string;
   heroEngine: string;
+  /**
+   * The single rival the teaser names across every surface (headline, lead, proof
+   * card, pattern table, headline count, leaderboard highlight). Selected once in
+   * `selectFindings`; see `SelectionResult.heroCompetitor`.
+   */
+  heroCompetitor: string;
   headline: string;
   leadSentence: string;
   headlineNumber: HeadlineNumber;
