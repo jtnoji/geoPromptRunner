@@ -1,11 +1,20 @@
 /**
  * Teaser one-pager template — fills the TeaserDraft into a single self-contained
  * HTML document, styled to the "Ledger" editorial design (imported from the
- * claude.ai/design project "GEO teaser document revamp"): warm cream paper,
- * Newsreader serif headlines + italic accents, Public Sans body, a rust accent.
+ * claude.ai/design project "GEO Teaser - Ledger"): warm cream paper, Newsreader
+ * serif headlines + italic accents, Public Sans body.
  *
- * Self-contained except for the Google Fonts <link> (the design uses Public Sans
- * + Newsreader). Print-clean for PDF export (the PDF is the deliverable).
+ * This is the merge of the working data-bound template with the design revamp:
+ * a dramatic DARK hero (ember glow + lighter accent) that folds the headline
+ * number into an in-hero stat band, and a dark CTA block — while keeping every
+ * data binding, the heroCompetitor spine, the "why AI skips you" section, and the
+ * reviewer `edits` overrides. Two accents by surface, matching the design: a
+ * lighter ember (--accent) on the dark hero/CTA, the deeper rust (--rust) on the
+ * light sections (proof mark, table, chart, stakes).
+ *
+ * Self-contained except for the Google Fonts <link> (Public Sans + Newsreader).
+ * Print-clean for PDF export (the PDF is the deliverable; printBackground is on,
+ * and the dark blocks force print-color-adjust so the ink survives the render).
  */
 
 import type { Finding, TeaserDraft } from "../types/domain.ts";
@@ -72,6 +81,10 @@ export const STYLE = `
     --muted:#54504a; --muted2:#7a756c; --faint:#8a857c; --faintest:#a99a93;
     --rule:#E6E2D9; --rule2:#EFEBE2; --track:#ECE8DF; --neutral:#b3ada2;
     --rust:#B85C3C; --rust-line:rgba(184,92,60,.4);
+    /* dark-surface palette (hero + CTA) */
+    --dark:#16150f; --cream:#FBFAF7; --cream-2:#e7e2d8; --cream-muted:#bdb8ad;
+    --cream-faint:#9a958b; --hairline:rgba(251,250,247,.14);
+    --accent:#E8896A; --accent-tint:#E8A98E; --accent-glow:rgba(184,92,60,.30);
     --serif:'Newsreader',Georgia,serif; --sans:'Public Sans',-apple-system,Segoe UI,Roboto,sans-serif;
   }
   * { box-sizing:border-box; }
@@ -81,23 +94,33 @@ export const STYLE = `
   .page { width:100%; max-width:760px; background:var(--paper); border-radius:5px; overflow:hidden; box-shadow:0 12px 50px rgba(27,26,23,.16); }
   .serif { font-family:var(--serif); }
   b, strong { font-weight:600; }
+  @keyframes bf-ping { 0% { transform:scale(1); opacity:.55; } 70%,100% { transform:scale(2.6); opacity:0; } }
 
-  /* ---- Hero ---- */
-  .hero { padding:48px 52px 8px; }
-  .eyebrow { font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:700; border-bottom:1px solid var(--rule); padding-bottom:16px; display:flex; justify-content:space-between; }
+  /* ---- Hero (dark, dramatic) ---- */
+  .hero { position:relative; overflow:hidden; padding:34px 52px 0; background: radial-gradient(120% 80% at 78% -10%, var(--accent-glow), transparent 60%), var(--dark); color:var(--cream); -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .hero > * { position:relative; }
+  .eyebrow { font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; border-bottom:1px solid var(--hairline); padding-bottom:16px; display:flex; align-items:center; justify-content:space-between; }
+  .eyebrow .live { display:inline-flex; align-items:center; gap:8px; color:var(--accent-tint); }
+  .eyebrow .live .dot { position:relative; width:8px; height:8px; display:inline-flex; align-items:center; justify-content:center; }
+  .eyebrow .live .dot::before { content:''; position:absolute; width:8px; height:8px; border-radius:50%; background:var(--accent); animation:bf-ping 1.8s cubic-bezier(0,0,.2,1) infinite; }
+  .eyebrow .live .dot::after { content:''; width:8px; height:8px; border-radius:50%; background:var(--accent); }
   .eyebrow .date { color:var(--faint); }
-  .hero h1 { font-family:var(--serif); font-weight:500; font-size:35px; line-height:1.16; letter-spacing:-.005em; margin:24px 0 14px; }
-  .hero .lead { font-size:16px; line-height:1.6; color:var(--muted); margin:0; max-width:62ch; }
-  .hero .lead .q { font-style:italic; font-family:var(--serif); color:var(--ink2); }
-  .hero .lead .rival { color:var(--rust); font-weight:600; border-bottom:1px solid var(--rust-line); }
+  .hero h1 { font-family:var(--serif); font-weight:500; font-size:40px; line-height:1.1; letter-spacing:-.01em; margin:26px 0 16px; }
+  .hero .lead { font-size:16.5px; line-height:1.6; color:var(--cream-muted); margin:0 0 30px; max-width:60ch; }
+  .hero .lead .q { font-style:italic; font-family:var(--serif); color:var(--cream-2); }
+  .hero .lead .rival { color:var(--accent); font-weight:600; border-bottom:1px solid var(--rust-line); }
 
-  /* ---- Big-number hero stat ---- */
-  .hero-stat { margin:24px 52px 0; padding:30px 0; border-top:1px solid var(--ink); border-bottom:1px solid var(--rule); text-align:center; }
-  .hero-stat .label { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); }
-  .hero-stat .big { font-family:var(--serif); font-weight:500; font-size:96px; line-height:1; color:var(--rust); margin:8px 0 6px; font-variant-numeric:tabular-nums; }
-  .hero-stat .big .of { font-size:30px; color:var(--faintest); }
-  .hero-stat .sub { font-size:14.5px; color:var(--muted); }
-  .hero-stat .sub b { color:var(--ink); }
+  /* ---- In-hero stat band ---- */
+  .hero-stat { display:flex; align-items:flex-end; gap:26px; border-top:1px solid var(--hairline); padding:26px 0 30px; }
+  .hero-stat .fig { flex:0 0 auto; }
+  .hero-stat .label { font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin-bottom:10px; }
+  .hero-stat .big { font-family:var(--serif); font-weight:500; font-size:104px; line-height:.82; color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .hero-stat .big .of { font-size:32px; color:#6f6a60; }
+  .hero-stat .copy { flex:1; padding-bottom:14px; font-size:15px; line-height:1.55; color:#cfcabf; }
+  .hero-stat .rival { display:flex; align-items:baseline; gap:9px; margin-top:8px; }
+  .hero-stat .rival .num { font-family:var(--serif); font-size:30px; font-weight:500; color:var(--cream); }
+  .hero-stat .rival .txt { font-size:14px; color:var(--cream-faint); }
+  .hero-stat .rival .txt b { color:var(--accent); font-weight:600; }
 
   /* ---- Sections ---- */
   .section { padding:0 52px; }
@@ -163,13 +186,16 @@ export const STYLE = `
   .stakes { margin:32px 52px 0; padding:0 0 0 20px; border-left:2px solid var(--rust); }
   .stakes p { margin:0; font-family:var(--serif); font-style:italic; font-size:18px; line-height:1.5; color:var(--ink2); }
 
-  /* ---- CTA ---- */
-  .cta { margin:26px 52px 10px; border:1px solid var(--rule); border-radius:10px; padding:22px 24px; display:flex; align-items:center; gap:18px; background:#fff; }
-  .cta .txt { font-size:15px; line-height:1.5; color:var(--muted); }
-  .cta .txt b { color:var(--ink); }
-  .cta .btn { margin-left:auto; background:var(--ink); color:var(--paper); font-weight:700; padding:12px 18px; border-radius:8px; white-space:nowrap; font-size:14px; }
+  /* ---- CTA (dark) ---- */
+  .cta { margin:34px 52px 0; background:var(--dark); border-radius:12px; padding:32px 32px 30px; color:var(--cream); -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .cta .kicker { font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin-bottom:12px; }
+  .cta .head { font-family:var(--serif); font-weight:500; font-size:23px; line-height:1.3; letter-spacing:-.01em; max-width:40ch; margin-bottom:24px; }
+  .cta .foot-row { display:flex; align-items:center; gap:20px; flex-wrap:wrap; border-top:1px solid var(--hairline); padding-top:22px; }
+  .cta .btn { display:inline-flex; align-items:center; gap:9px; background:var(--cream); color:var(--dark); font-weight:700; padding:13px 22px; border-radius:8px; font-size:14px; white-space:nowrap; }
+  .cta .btn .arrow { font-size:16px; }
+  .cta .sub { font-size:13.5px; color:var(--cream-faint); line-height:1.5; }
 
-  .foot { padding:14px 52px 32px; font-size:10.5px; color:var(--faintest); line-height:1.6; }
+  .foot { padding:20px 52px 32px; font-size:10.5px; color:var(--faintest); line-height:1.6; }
 
   @media print {
     body { background:#fff; }
@@ -278,16 +304,20 @@ export function renderTeaserHtml(t: TeaserDraft, edits: TeaserEdits = {}): strin
   <div class="wrap">
     <main class="page">
       <header class="hero">
-        <div class="eyebrow"><span>AI Visibility Check · Prepared for ${escapeHtml(t.companyName)}</span><span class="date">${escapeHtml(t.runDate)}</span></div>
+        <div class="eyebrow"><span class="live"><span class="dot"></span>AI Visibility Check · Prepared for ${escapeHtml(t.companyName)}</span><span class="date">${escapeHtml(t.runDate)}</span></div>
         <h1>${escapeHtml(headline)}</h1>
         <p class="lead">${heroLead}</p>
+        <div class="hero-stat">
+          <div class="fig">
+            <div class="label">${escapeHtml(t.companyName)} appears in</div>
+            <div class="big">${h.companyAppears} <span class="of">/ ${h.n}</span></div>
+          </div>
+          <div class="copy">
+            high-intent buyer queries.
+            <div class="rival"><span class="num">${h.competitorAppears}</span><span class="txt">name <b>${escapeHtml(h.competitorName)}</b> instead</span></div>
+          </div>
+        </div>
       </header>
-
-      <section class="hero-stat">
-        <div class="label">${escapeHtml(t.companyName)} appears in</div>
-        <div class="big">${h.companyAppears} <span class="of">of ${h.n}</span></div>
-        <div class="sub">high-intent buyer queries — <b>${escapeHtml(h.competitorName)} appears in ${h.competitorAppears}</b>.</div>
-      </section>
 
       <section class="section">
         <div class="kicker">See it for yourself</div>
@@ -316,8 +346,12 @@ export function renderTeaserHtml(t: TeaserDraft, edits: TeaserEdits = {}): strin
       <div class="stakes"><p>${escapeHtml(stakesLine)}</p></div>
 
       <div class="cta">
-        <div class="txt">${escapeHtml(ctaText)}</div>
-        <div class="btn">Book 15 min →</div>
+        <div class="kicker">The full picture</div>
+        <div class="head">${escapeHtml(ctaText)}</div>
+        <div class="foot-row">
+          <span class="btn">Book 15 min <span class="arrow">→</span></span>
+          <span class="sub">A 15-minute call to see exactly what a full audit would surface for ${escapeHtml(t.companyName)}.</span>
+        </div>
       </div>
 
       <div class="foot">
