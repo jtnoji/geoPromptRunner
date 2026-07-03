@@ -61,6 +61,27 @@ export function headlineNumberSentence(companyName: string, h: HeadlineNumber): 
 }
 
 export function stakesLine(companyName: string, h: HeadlineNumber): string {
+  // Prefer the hard, data-grounded count: how many times AI recommended the rival
+  // over the client across the questions × engines we actually checked. This is a
+  // real tally of the cached answers — no traffic/revenue modeling — and, because
+  // it spans multiple engines, it quantifies the loss AND reinforces that it's a
+  // cross-model pattern, not a single-engine quirk.
+  if (h.lostRecommendations > 0 && h.enginesCovered > 0) {
+    const times = h.lostRecommendations === 1 ? "time" : "times";
+    const questions = h.n === 1 ? "question" : "questions";
+    const engines = h.enginesCovered === 1 ? "engine" : "engines";
+    const clientClause =
+      h.companyAppears === 0
+        ? `${companyName} was recommended in none of them`
+        : `${companyName} in just ${h.companyAppears} of ${h.n}`;
+    return (
+      `Across ${h.n} buyer ${questions} on ${h.enginesCovered} AI ${engines}, AI recommended ` +
+      `${h.competitorName} over ${companyName} ${h.lostRecommendations} ${times} — ` +
+      `${clientClause}. Each one is a buyer pointed to a rival at the exact moment ` +
+      `they're choosing, before ${companyName} ever enters the conversation.`
+    );
+  }
+  // Fallback (no competitor-present cells recorded): keep the query-gap framing.
   const gap = h.n - h.companyAppears;
   return (
     `Every one of those ${gap} queries is a buyer being pointed to a competitor at the ` +

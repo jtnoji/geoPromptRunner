@@ -96,6 +96,64 @@ test("table holds distinct queries, not the lead's", () => {
   for (const f of r.table) assert.notEqual(f.queryId, r.lead.queryId);
 });
 
+// The pattern table should read as cross-model: when a lower-scored losing query
+// sits on an engine not yet shown, it's preferred over a higher-scored one that
+// repeats an engine already in the table/lead. Here q3 (perplexity) outscores q4
+// (gemini) but repeats q2's engine, so q4 is chosen to diversify.
+test("table prefers a distinct engine over a higher-scored repeat", () => {
+  const report = baseReport({
+    engines: ["openai", "perplexity", "gemini"],
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "openai", competitor: "YNAB" }, // lead
+      { query_id: "q2", intent: "comparison", engine_name: "perplexity", competitor: "YNAB" },
+      { query_id: "q3", intent: "comparison", engine_name: "perplexity", competitor: "YNAB" },
+      { query_id: "q4", intent: "comparison", engine_name: "gemini", competitor: "YNAB" },
+    ],
+  });
+  const mk = (id: string, engine: string, intent: string): AnswerRecord => ({
+    query_id: id, intent: intent as AnswerRecord["intent"], prompt: `${id}?`,
+    engine_name: engine, run_index: 0, response: "YNAB wins.", citations: [], timestamp: "t",
+  });
+  const ans = [
+    mk("q1", "openai", "category"),
+    mk("q2", "perplexity", "comparison"),
+    mk("q3", "perplexity", "comparison"),
+    mk("q4", "gemini", "comparison"),
+  ];
+  const r = selectFindings(profile(), report, ans);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.lead.queryId, "q1");
+  assert.equal(r.table.length, 2);
+  // q4 (gemini) is chosen over the higher-scored q3 (perplexity, a repeat).
+  assert.ok(r.table.some((f) => f.queryId === "q4"));
+  assert.ok(!r.table.some((f) => f.queryId === "q3"));
+  // Lead + table span three distinct engines — the pattern is cross-model.
+  const engines = new Set([r.lead.engineName, ...r.table.map((f) => f.engineName)]);
+  assert.equal(engines.size, 3);
+});
+
+// When only one engine produced losing queries, the table still fills its 2 rows
+// (pass 2 backfills regardless of engine) rather than leaving the table short.
+test("table backfills from one engine when no distinct engine is available", () => {
+  const report = baseReport({
+    engines: ["perplexity"],
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "perplexity", competitor: "YNAB" }, // lead
+      { query_id: "q2", intent: "comparison", engine_name: "perplexity", competitor: "YNAB" },
+      { query_id: "q3", intent: "comparison", engine_name: "perplexity", competitor: "YNAB" },
+    ],
+  });
+  const mk = (id: string, intent: string): AnswerRecord => ({
+    query_id: id, intent: intent as AnswerRecord["intent"], prompt: `${id}?`,
+    engine_name: "perplexity", run_index: 0, response: "YNAB wins.", citations: [], timestamp: "t",
+  });
+  const r = selectFindings(profile(), report, [mk("q1", "category"), mk("q2", "comparison"), mk("q3", "comparison")]);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.equal(r.table.length, 2);
+});
+
 test("regex detection mode is refused", () => {
   const r = selectFindings(profile(), baseReport({ detection: "regex" }), answers());
   assert.equal(r.ok, false);

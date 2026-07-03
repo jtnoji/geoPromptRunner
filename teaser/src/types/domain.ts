@@ -57,6 +57,16 @@ export interface HeadlineNumber {
   competitorAppears: number;
   competitorName: string;
   n: number;
+  /**
+   * Data-grounded loss counts (no modeling, no assumptions) that quantify the
+   * gap beyond "you're losing queries." Computed from the cached answers:
+   * `lostRecommendations` = the number of (query × engine) cells where the
+   * competitor was recommended and the client was absent — the hard count behind
+   * the "not a one-off" story. `enginesCovered` = distinct engines actually
+   * queried, so the count can be framed as spanning models, not one engine.
+   */
+  lostRecommendations: number;
+  enginesCovered: number;
 }
 
 /** A fully-assembled draft teaser, ready for review/render. */
