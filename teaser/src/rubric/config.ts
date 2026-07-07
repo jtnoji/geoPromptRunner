@@ -106,6 +106,31 @@ export const ENGINE_CREDIBILITY: Record<string, number> = {
 };
 
 /**
+ * Fold engine aliases + case to ONE identity for the CROSS-MODEL count only
+ * (I4 / `enginesCovered`) — so `ai_overviews` and `google_ai_overviews`, or a
+ * search variant vs its base, don't inflate "the same rival beats you across N
+ * engines" into counting one model twice. Credibility scoring keeps the raw name
+ * (search variants are genuinely more credible), so this is separate from
+ * ENGINE_CREDIBILITY on purpose.
+ */
+const ENGINE_CANONICAL: Record<string, string> = {
+  perplexity: "perplexity",
+  ai_overviews: "ai_overviews",
+  google_ai_overviews: "ai_overviews",
+  openai: "openai",
+  openai_search: "openai",
+  gemini: "gemini",
+  gemini_grounded: "gemini",
+  anthropic: "anthropic",
+  anthropic_search: "anthropic",
+};
+
+export function canonicalEngine(engine: string): string {
+  const key = engine.trim().toLowerCase();
+  return ENGINE_CANONICAL[key] ?? key;
+}
+
+/**
  * Buyer intents strong enough to justify HEADLINING a rival. The category leader
  * is only elevated to hero when it loses on one of these — a weak brand-tier or
  * adjacent-authority loss isn't a persuasive enough proof to build the H1 on.

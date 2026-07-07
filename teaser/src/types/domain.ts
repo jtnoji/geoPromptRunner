@@ -106,6 +106,14 @@ export interface TeaserDraft {
   /** Cached report + answers so the teaser is reproducible as engines drift. */
   report: ReportPayload;
   answers: AnswerRecord[];
+  /**
+   * Competitor name → aliases, carried from the resolved profile so the rubric
+   * validator can match rivals ALIAS-aware (the platform's `report.competitors`
+   * is names-only). Without this the validator's count/head-to-head checks are
+   * strictly weaker than selection — the "independent backstop" would miss any
+   * alias-referenced rival. Empty for regenerated drafts (aliases aren't stored).
+   */
+  competitorAliases?: Record<string, string[]>;
   status: "draft" | "approved" | "rejected" | "exported";
   /**
    * Rubric warnings surfaced by `validateDraft` at assembly time (quality issues

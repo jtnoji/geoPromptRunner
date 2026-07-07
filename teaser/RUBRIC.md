@@ -33,7 +33,7 @@ The teaser is *about one competitor.* The headline, lead sentence, proof card, h
 ### I2 · Every number traces to a cached answer
 No fabricated metrics, no traffic/revenue modeling. Every printed finding joins to a real verbatim answer, and every headline number is supported by the cached answers.
 - **Failure mode:** a stale/edited headline claiming more absence than the data shows; a proof card quoting an answer that isn't in the run.
-- **Enforced:** validator checks join integrity + sane bounds + **anti-overstatement upper bounds** (`companyAppears ≤` queries that actually name the client; `lostRecommendations ≤` client-absent cells; `n ≤` distinct answered queries; `enginesCovered ≤` distinct answered engines). Counts are re-derived independently from `draft.answers`.
+- **Enforced:** validator checks join + **quote integrity** (the printed answer text must actually occur in the cached response — no fabricated proof cards), sane bounds, and **anti-overstatement upper bounds** (`companyAppears ≤` queries naming the client; `competitorAppears ≤` queries naming the rival; `lostRecommendations ≤` cells where the rival is present *and* the client absent; `n ≤` distinct answered queries; `enginesCovered ≤` distinct answered engines). Counts are re-derived independently from `draft.answers`, alias-aware via the shared matcher.
 
 ### I3 · Nothing structurally rigged is printed
 Every query shown is one the client *could* have won. A **closed head-to-head** — text naming ≥2 rivals while omitting the client ("is Whoop or Oura better?") — bounds the answer to the named brands, so the client can't be recommended. Its absence is a non-result.
@@ -124,3 +124,10 @@ When a new credibility issue is found, don't patch one function — add it to th
 2. If it's checkable against an assembled draft, add an assertion to [`validate.ts`](src/rubric/validate.ts) — `block` for an invariant, `warn` for a quality issue — and a test in `tests/rubric.test.ts`.
 3. If it constrains generation (queries) or selection (findings), enforce it there too, reading the same config knob (prevention + backstop, like A5/I3).
 4. Document it here with its **failure mode** — the embarrassing teaser it prevents.
+
+## Known limits
+
+- **One shared matcher.** Brand detection across all three layers (generation, selection, validation) goes through a single Unicode + alias-aware matcher ([`src/select/entity.ts`](src/select/entity.ts)). Keep it that way — when the layers used different boundary rules, a rival like `C#` or an accented name matched in one and not the other, letting a rigged query slip through. Add new detection through this primitive, not a private regex.
+- **Alias-awareness needs the aliases on the draft.** The validator matches rivals alias-aware via `draft.competitorAliases` (carried from the resolved profile). A **regenerated** draft has no stored aliases, so its checks fall back to names-only — same limitation as the headline count, and safe (it can only understate, never false-block).
+- **Untracked brands.** A head-to-head naming a brand that isn't a tracked competitor (e.g. "Whoop or Fitbit?" when Fitbit isn't in the competitor list) is invisible to both selection and validation — a fundamental limit of name/alias detection. The human confirm gate on competitors (E4) is the mitigation.
+- **Reviewer edits** to `leadSentence`/`stakesLine` happen at render (after validation) and are the human's responsibility (D4/E3); the validator pins the *generated* copy to the hero, not post-edit text.

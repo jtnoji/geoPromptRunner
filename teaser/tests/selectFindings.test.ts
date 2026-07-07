@@ -317,6 +317,41 @@ test("all losing queries are rival-vs-rival head-to-heads -> clean refusal", () 
   assert.equal(r.ok, false);
 });
 
+// Regression for adversarial finding #1 (reachable through the LIVE pipeline): a
+// head-to-head between rivals whose names border punctuation ("C# or Go") must be
+// excluded. The old ASCII \b matcher failed to see "C#", counted only "Go", and
+// let the rigged query print as the lead.
+test("a punctuation-bordered head-to-head (C# or Go) is excluded", () => {
+  const p = profile();
+  p.name = "DevText";
+  p.competitors = [
+    { name: "C#", aliases: [], confirmed: true },
+    { name: "Go", aliases: [], confirmed: true },
+  ];
+  const report = baseReport({
+    client_name: "DevText",
+    competitors: ["C#", "Go"],
+    engines: ["perplexity", "openai"],
+    scorecard: { ...baseReport().scorecard, top_competitor: "Go" },
+    losing_queries: [
+      { query_id: "q1", intent: "category", engine_name: "openai", competitor: "Go" },
+      { query_id: "q2", intent: "comparison", engine_name: "perplexity", competitor: "Go" }, // the rigged one
+    ],
+  });
+  const ans: AnswerRecord[] = [
+    { query_id: "q1", intent: "category", prompt: "best language for a first backend?", engine_name: "openai",
+      run_index: 0, response: "Go is a great pick.", citations: [], timestamp: "t" },
+    { query_id: "q2", intent: "comparison", prompt: "Is C# or Go the better first language?", engine_name: "perplexity",
+      run_index: 0, response: "Go edges out C#.", citations: [], timestamp: "t" },
+  ];
+  const r = selectFindings(p, report, ans);
+  assert.equal(r.ok, true);
+  if (!r.ok) return;
+  assert.notEqual(r.lead.queryId, "q2");
+  assert.ok(!r.table.some((f) => f.queryId === "q2"));
+  assert.equal(r.headline.n, 1); // only q1 counts
+});
+
 test("regex detection mode is refused", () => {
   const r = selectFindings(profile(), baseReport({ detection: "regex" }), answers());
   assert.equal(r.ok, false);

@@ -227,3 +227,81 @@ test("a non-hero rival in the table warns but does not block (backfill is allowe
   assert.ok(vs.some((v) => v.rule === "I1-table" && v.severity === "warn"));
   assert.equal(vs.filter((v) => v.severity === "block").length, 0);
 });
+
+// ── Adversarial regressions ─────────────────────────────────────────────────
+
+// Finding #2: the validator must verify the quoted answer TEXT actually appears
+// in the cached response, not just that the query_id/engine join exists.
+test("I2: a fabricated proof quote (not in the cached answer) is blocked", () => {
+  const d = validDraft();
+  d.lead = {
+    ...leadFinding(),
+    verbatimAnswer: "Whoop is vastly superior to Fort in every way; Fort isn't worth considering.",
+  };
+  assert.ok(blocks(d).some((v) => v.rule === "I2"), "fabricated quote is caught");
+});
+
+// Finding #3: the headline check must use word boundaries, not substring — a hero
+// ("Cal") that is a substring of the rival actually named in the H1 ("Calendly")
+// must NOT satisfy the check.
+function calDraft(): TeaserDraft {
+  const mk = (query_id: string, engine_name: string, prompt: string, response: string): AnswerRecord => ({
+    query_id, intent: "category", prompt, engine_name, run_index: 0, response, citations: [], timestamp: "t",
+  });
+  return {
+    ...validDraft(),
+    heroCompetitor: "Cal",
+    headline: "AI is sending your buyers to Calendly — not Fort.",
+    headlineNumber: { companyAppears: 1, competitorAppears: 2, competitorName: "Cal", n: 3, lostRecommendations: 2, enginesCovered: 3 },
+    lead: { ...leadFinding(), competitor: "Cal", verbatimQuery: "best scheduling tool?", verbatimAnswer: "Cal is great." },
+    table: [{ ...tableFinding(), competitor: "Cal", verbatimQuery: "alternatives to Calendly?", verbatimAnswer: "Cal is the top pick." }],
+    report: report({ competitors: ["Cal", "Calendly"], scorecard: { ...report().scorecard, top_competitor: "Cal" } }),
+    answers: [
+      mk("q1", "perplexity", "best scheduling tool?", "Cal is great."),
+      mk("q2", "openai", "alternatives to Calendly?", "Cal is the top pick."),
+      mk("q3", "gemini", "is Fort any good?", "Fort is fine."),
+    ],
+  };
+}
+
+test("I1: a hero that is a substring of the rival named in the headline is blocked", () => {
+  const d = calDraft();
+  const bs = blocks(d);
+  assert.ok(bs.some((v) => v.rule === "I1"), "the H1 names Calendly, not the hero Cal");
+  // And nothing but I1 fires — proving it's specifically the headline naming.
+  assert.equal(bs.filter((v) => v.rule !== "I1").length, 0);
+});
+
+test("I1: an empty headline is blocked when a hero is set", () => {
+  const d = validDraft();
+  d.headline = "";
+  assert.ok(blocks(d).some((v) => v.rule === "I1"));
+});
+
+test("I1: a headline foregrounding a different rival (hero only in an aside) is blocked", () => {
+  const d = validDraft(); // hero Whoop
+  d.headline = "AI is sending your buyers to Oura — not Fort. (Even Whoop beats you.)";
+  assert.ok(blocks(d).some((v) => v.rule === "I1"), "naming Oura trips the no-other-rival check");
+});
+
+// Finding #4: competitorAppears had no anti-overstatement bound.
+test("I2: overstating the rival's appearances beyond the answers is blocked", () => {
+  const d = validDraft(); // hero named in 2 of 3 answered queries
+  d.headlineNumber = { ...d.headlineNumber, competitorAppears: 3 };
+  assert.ok(blocks(d).some((v) => v.rule === "I2"));
+});
+
+// Finding #5: lostRecommendations must be bounded by cells where the rival is
+// present AND the client absent — not merely client-absent cells.
+test("I2: lostRecommendations beyond hero-present client-absent cells is blocked", () => {
+  const mk = (query_id: string, engine_name: string, response: string): AnswerRecord => ({
+    query_id, intent: "category", prompt: `${query_id}?`, engine_name, run_index: 0, response, citations: [], timestamp: "t",
+  });
+  const d = validDraft();
+  // q4 is client-absent but the hero is ALSO absent — it must not count as a loss
+  // to the hero. There are 3 client-absent cells but only 2 hero-present ones.
+  d.answers = [...answers(), mk("q4", "perplexity", "Garmin is a solid pick.")];
+  d.headlineNumber = { ...d.headlineNumber, n: 4, lostRecommendations: 3 };
+  const msg = blocks(d).find((v) => v.rule === "I2" && /lost recommendation/i.test(v.message));
+  assert.ok(msg, "the looser client-absent bound would have passed 3; the tight bound catches it");
+});

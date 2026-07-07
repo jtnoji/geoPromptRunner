@@ -178,6 +178,9 @@ export function assembleDraft(
     table: selection.table,
     report,
     answers,
+    competitorAliases: Object.fromEntries(
+      profile.competitors.map((c) => [c.name, c.aliases]),
+    ),
     status: "draft",
   };
 

@@ -97,6 +97,49 @@ test("a comparison naming TWO rivals (closed head-to-head) is dropped (rule A5)"
   }
 });
 
+// Finding #6: the winnability count must be alias-aware — a head-to-head naming a
+// rival only by an alias ("YNAB") is just as unwinnable as the canonical name.
+test("a head-to-head naming rivals by ALIAS is dropped (rule A5, alias-aware)", () => {
+  const p = profile({
+    name: "Acme",
+    competitors: [
+      { name: "You Need A Budget", aliases: ["YNAB"], confirmed: false },
+      { name: "Mint", aliases: [], confirmed: false },
+    ],
+  });
+  const queries = validateAndRepair(p, [
+    raw("What's the best budgeting app for a family?", "category"),
+    raw("Is YNAB or Mint the better budgeting app?", "comparison"), // alias head-to-head
+    raw("What are the best alternatives to Mint?", "comparison"),
+    raw("Is Acme any good?", "brand"),
+  ]);
+  assert.ok(
+    !queries.some((q) => /ynab or mint/i.test(q.text)),
+    "the alias-named head-to-head is dropped",
+  );
+});
+
+// Finding #7: synth/template comparisons interpolate profile.category verbatim and
+// were never re-validated — a category that word-matches a rival smuggled a second
+// competitor in. The final winnability pass must catch it.
+test("a category string that names a rival can't smuggle a second competitor into a comparison", () => {
+  // Empty raw -> template fallback. Category contains "HubSpot"; the template
+  // "Salesforce vs other HubSpot-style CRM options" would name TWO rivals.
+  const p = profile({
+    name: "Acme",
+    category: "HubSpot-style CRM",
+    competitors: [
+      { name: "Salesforce", aliases: [], confirmed: false },
+      { name: "HubSpot", aliases: [], confirmed: false },
+    ],
+  });
+  const queries = validateAndRepair(p, []);
+  for (const q of queries.filter((x) => x.intent === "comparison")) {
+    const named = ["salesforce", "hubspot"].filter((c) => q.text.toLowerCase().includes(c)).length;
+    assert.ok(named <= 1, `comparison names at most one competitor (category can't smuggle one in): ${q.text}`);
+  }
+});
+
 test("synthesized comparisons never pit two rivals against each other", () => {
   // No comparisons supplied -> synthesis fills the >=2 client-free requirement.
   const queries = validateAndRepair(profile(), [

@@ -27,6 +27,7 @@ import {
   QUERY_COUNT,
   QUERY_WEIGHTS,
 } from "../rubric/config.ts";
+import { buildMatcher } from "../select/entity.ts";
 import type {
   CompanyProfile,
   GeneratedQuery,
@@ -97,24 +98,6 @@ function userPrompt(profile: CompanyProfile): string {
   ].join("\n");
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Case-insensitive WHOLE-WORD presence of `name` in `text`. Bounded by Unicode
- * letter/number lookarounds rather than a bare substring so a client named with
- * a common word ("Notion", "Loop", "Cash") doesn't match "notional", "loophole",
- * or "cashflow" — a substring match here over-drops valid category/comparison
- * queries as false rule-1 violations.
- */
-function mentions(text: string, name: string): boolean {
-  const n = name.trim();
-  if (!n) return false;
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(n)}(?![\\p{L}\\p{N}])`, "iu");
-  return re.test(text);
-}
-
 /**
  * Validate the raw queries against the hard rules and repair deterministically.
  * Pure (no network) — the core of the tested logic.
@@ -136,9 +119,22 @@ export function validateAndRepair(
   raw: RawQuery[],
 ): GeneratedQuery[] {
   const client = profile.name;
-  const competitorNames = profile.competitors.map((c) => c.name).filter(Boolean);
+  // ONE matcher primitive, shared with selection + validation (Unicode + alias
+  // aware): a comparison naming a rival only by an ALIAS ("is YNAB or Mint
+  // better?") is just as unwinnable as one naming it canonically, so counting
+  // must see aliases too (adversarial finding #6).
+  const namesClient = buildMatcher(client);
+  const compMatchers = profile.competitors
+    .filter((c) => c.name.trim())
+    .map((c) => buildMatcher(c.name, c.aliases));
   const countCompetitorsNamed = (text: string): number =>
-    competitorNames.filter((c) => mentions(text, c)).length;
+    compMatchers.filter((m) => m(text)).length;
+
+  // Rule A5 (winnability): a comparison naming >1 rival with no client is a
+  // closed head-to-head ("is X or Y better?") — structurally unwinnable, so it
+  // proves nothing and we never print it. Reject it wherever it appears.
+  const isUnwinnableComparison = (q: RawQuery): boolean =>
+    q.intent === "comparison" && !namesClient(q.text) && countCompetitorsNamed(q.text) > MAX_COMPETITORS_PER_COMPARISON;
 
   // Pass 1: keep only well-formed, rule-compliant queries.
   const kept: RawQuery[] = [];
@@ -147,16 +143,12 @@ export function validateAndRepair(
     if (!text) continue;
     if (!INTENTS.includes(q.intent)) continue;
     // Rule 1: only brand queries may name the client.
-    if (q.intent !== "brand" && mentions(text, client)) continue;
+    if (q.intent !== "brand" && namesClient(text)) continue;
     if (q.intent === "comparison") {
-      const named = countCompetitorsNamed(text);
       // Rule 3: comparison queries must name a competitor.
-      if (named < 1) continue;
-      // Rule A5 (winnability): a comparison naming 2+ rivals with no client is a
-      // closed head-to-head ("is X or Y better?") — structurally unwinnable, so
-      // drop it here rather than pay to run a query that can only ever prove the
-      // client absent. (Rule 1 already removed any client-named comparison.)
-      if (named > MAX_COMPETITORS_PER_COMPARISON) continue;
+      if (countCompetitorsNamed(text) < 1) continue;
+      // Rule A5: no closed head-to-heads (see above).
+      if (isUnwinnableComparison({ text, intent: q.intent })) continue;
     }
     kept.push({ text, intent: q.intent });
   }
@@ -164,7 +156,7 @@ export function validateAndRepair(
   // Rule 2: ensure >=MIN_CLIENT_FREE_COMPARISONS comparison queries that do NOT
   // name the client.
   const clientFreeComparisons = kept.filter(
-    (q) => q.intent === "comparison" && !mentions(q.text, client),
+    (q) => q.intent === "comparison" && !namesClient(q.text),
   );
   const needed = MIN_CLIENT_FREE_COMPARISONS - clientFreeComparisons.length;
   if (needed > 0) {
@@ -177,7 +169,13 @@ export function validateAndRepair(
   }
 
   // Last resort: if somehow nothing usable remains, use the full template set.
-  const usable = kept.length >= 3 ? kept : templateQueries(profile);
+  // Re-run the winnability filter over the FINAL list: synth/template queries
+  // interpolate profile.category verbatim and were never pass-1 checked, so a
+  // category that word-matches a rival ("Salesforce-style CRM") could otherwise
+  // smuggle a second competitor into a comparison (adversarial finding #7).
+  const usable = (kept.length >= 3 ? kept : templateQueries(profile)).filter(
+    (q) => !isUnwinnableComparison(q),
+  );
 
   return usable.map(
     (q, i): GeneratedQuery => ({
