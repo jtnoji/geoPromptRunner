@@ -106,8 +106,8 @@ export function renderProofCard(companyName: string, finding: Finding, runDate: 
     <div class="proof-chrome">
       <span class="proof-avatar" style="background:${engineColor(finding.engineName)}">${escapeHtml(initial)}</span>
       <span class="proof-engine">${escapeHtml(engineLabel(finding.engineName))}</span>
-      <span class="proof-live"><span class="dot"></span>live answer</span>
-      <span class="proof-date">${escapeHtml(runDate)}</span>
+      <span class="proof-live"><span class="dot"></span>verbatim answer</span>
+      <span class="proof-date">captured ${escapeHtml(runDate)}</span>
     </div>
     <div class="proof-body">
       <div class="proof-q-label">Buyer asks</div>

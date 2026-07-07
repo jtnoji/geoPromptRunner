@@ -69,6 +69,20 @@ export interface HeadlineNumber {
   enginesCovered: number;
 }
 
+/**
+ * A rubric violation found by `validateDraft` (src/rubric/validate.ts). `block`
+ * severity means the draft must not render/export (a cross-cutting invariant was
+ * broken); `warn` surfaces to the human reviewer without blocking. See RUBRIC.md.
+ */
+export interface Violation {
+  /** Stable rule id from the rubric, e.g. "I1", "I3", "Q-thin-table". */
+  rule: string;
+  severity: "block" | "warn";
+  /** The teaser surface the violation is about (headline, proof, table, …). */
+  surface: string;
+  message: string;
+}
+
 /** A fully-assembled draft teaser, ready for review/render. */
 export interface TeaserDraft {
   prospectUrl: string;
@@ -93,4 +107,11 @@ export interface TeaserDraft {
   report: ReportPayload;
   answers: AnswerRecord[];
   status: "draft" | "approved" | "rejected" | "exported";
+  /**
+   * Rubric warnings surfaced by `validateDraft` at assembly time (quality issues
+   * that don't block render — the reviewer decides). Block-severity violations
+   * never reach here: they fail assembly with a reason instead. Optional so
+   * pre-rubric drafts and external constructions stay valid.
+   */
+  warnings?: Violation[];
 }

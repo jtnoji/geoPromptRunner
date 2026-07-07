@@ -78,6 +78,37 @@ test("comparison query naming no competitor is dropped (rule 3)", () => {
   }
 });
 
+test("a comparison naming TWO rivals (closed head-to-head) is dropped (rule A5)", () => {
+  const queries = validateAndRepair(profile(), [
+    raw("What's the best CRM for a startup?", "category"),
+    // Illegal: pits two rivals against each other, client absent — unwinnable.
+    raw("Is Salesforce or HubSpot better for most teams?", "comparison"),
+    raw("What are the best alternatives to Salesforce?", "comparison"),
+    raw("Is Acme any good?", "brand"),
+  ]);
+  assert.ok(
+    !queries.some((q) => /salesforce or hubspot/i.test(q.text)),
+    "the two-rival head-to-head is dropped",
+  );
+  // Every surviving comparison names at most one competitor.
+  for (const q of queries.filter((x) => x.intent === "comparison")) {
+    const named = ["salesforce", "hubspot"].filter((c) => q.text.toLowerCase().includes(c)).length;
+    assert.ok(named <= 1, `comparison names at most one competitor: ${q.text}`);
+  }
+});
+
+test("synthesized comparisons never pit two rivals against each other", () => {
+  // No comparisons supplied -> synthesis fills the >=2 client-free requirement.
+  const queries = validateAndRepair(profile(), [
+    raw("What's the best CRM for a startup?", "category"),
+    raw("Is Acme any good?", "brand"),
+  ]);
+  for (const q of queries.filter((x) => x.intent === "comparison")) {
+    const named = ["salesforce", "hubspot"].filter((c) => q.text.toLowerCase().includes(c)).length;
+    assert.ok(named <= 1, `synthesized comparison names at most one competitor: ${q.text}`);
+  }
+});
+
 test("fewer than 2 client-free comparisons are synthesized (rule 2)", () => {
   // Only one comparison, and it names the client -> 0 client-free comparisons.
   const queries = validateAndRepair(profile(), [

@@ -20,6 +20,7 @@ import {
   leadSentence,
   stakesLine,
 } from "./render/copy.ts";
+import { validateDraft } from "./rubric/validate.ts";
 import type { CompanyProfile, GeneratedQuerySet, TeaserDraft } from "./types/domain.ts";
 import type { AnswerRecord, ReportPayload, RunStatus } from "./types/platform.ts";
 
@@ -179,6 +180,21 @@ export function assembleDraft(
     answers,
     status: "draft",
   };
+
+  // Rubric gate (src/rubric/validate.ts): a draft that breaks a cross-cutting
+  // invariant must never reach the human review step as a rubber-stamp — fail
+  // assembly with the reasons. Warnings ride along on the draft for the reviewer.
+  const violations = validateDraft(draft);
+  const blocking = violations.filter((x) => x.severity === "block");
+  if (blocking.length > 0) {
+    return {
+      ok: false,
+      stage: "validate",
+      reason: `teaser failed the rubric: ${blocking.map((x) => `[${x.rule}] ${x.message}`).join("; ")}`,
+    };
+  }
+  draft.warnings = violations; // block set is empty here → only warnings remain
+
   return { ok: true, draft };
 }
 

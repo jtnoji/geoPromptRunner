@@ -6,7 +6,10 @@
  * Hard rules honored (and ENFORCED post-hoc — see validateAndRepair):
  *   - >=2 comparison queries that do NOT name the client (test unprompted surfacing)
  *   - the client is named ONLY in the brand-intent query
- *   - competitors are named in comparison queries
+ *   - every comparison query names exactly ONE competitor — never a closed
+ *     head-to-head between two rivals ("is Whoop or Oura better?"), which the
+ *     client can't win and so is worthless as proof (rubric rule A5; the shared
+ *     MAX_COMPETITORS_PER_COMPARISON knob also backstops this in selectFindings)
  *   - weighted toward category/comparison (where teasers land)
  *   - 5 intent buckets: problem_aware | category | comparison | brand | adjacent_authority
  *
@@ -17,6 +20,13 @@
  */
 
 import { extractJson } from "../llm/claude.ts";
+import {
+  INTENTS,
+  MAX_COMPETITORS_PER_COMPARISON,
+  MIN_CLIENT_FREE_COMPARISONS,
+  QUERY_COUNT,
+  QUERY_WEIGHTS,
+} from "../rubric/config.ts";
 import type {
   CompanyProfile,
   GeneratedQuery,
@@ -26,23 +36,6 @@ import type { IntentBucket } from "../types/platform.ts";
 import type { QuerySetGenerator } from "./QuerySetGenerator.ts";
 
 const VERSION = "teaser-claude-v1";
-
-const INTENTS: IntentBucket[] = [
-  "problem_aware",
-  "category",
-  "comparison",
-  "brand",
-  "adjacent_authority",
-];
-
-/** Per-bucket weights — heavier on category/comparison (matches the mock). */
-const WEIGHTS: Record<IntentBucket, number> = {
-  problem_aware: 1.0,
-  category: 1.4,
-  comparison: 1.8,
-  brand: 2.0,
-  adjacent_authority: 1.0,
-};
 
 /** Raw query shape Claude returns (no weight/query_id — we assign those). */
 interface RawQuery {
@@ -79,18 +72,18 @@ function systemPrompt(): string {
 Tag each query with exactly one intent bucket:
 - problem_aware: first-person buyer pain; NEVER name the category, the client, or any brand.
 - category: "best <category> for X" style; may carry a real qualifier; do NOT name the client.
-- comparison: head-to-heads and "alternatives to <competitor>"; name competitors. At least TWO comparison queries must NOT name the client (these test whether the client surfaces unprompted).
+- comparison: "alternatives to <competitor>" / "<competitor> vs other options" — name exactly ONE competitor. At least TWO comparison queries must NOT name the client (these test whether the client surfaces unprompted).
 - brand: bottom-funnel about the CLIENT specifically (this is the ONLY bucket that may name the client).
 - adjacent_authority: a topic the client could plausibly own as an expert; name no brand.
 
 Hard rules:
 1. The client is named ONLY in brand-intent queries — never in category/comparison/problem_aware/adjacent_authority.
 2. At least 2 comparison queries leave the client unnamed.
-3. Every comparison query names at least one competitor.
+3. Every comparison query names EXACTLY ONE competitor. NEVER pit two rivals against each other ("is X or Y better?", "X vs Y") without the client — that bounds the answer to X and Y, so the client can't be recommended and the query proves nothing.
 4. Weight the set toward category and comparison.
 5. Write like a buyer talks to a chatbot — one question each, no compound asks, no leading queries that embed the answer.
 
-Return 7-9 queries total.`;
+Return ${QUERY_COUNT.min}-${QUERY_COUNT.max} queries total.`;
 }
 
 function userPrompt(profile: CompanyProfile): string {
@@ -100,7 +93,7 @@ function userPrompt(profile: CompanyProfile): string {
     `Category: ${profile.category}`,
     `Competitors: ${competitorNames.length ? competitorNames.join(", ") : "(none provided — use real category leaders)"}`,
     "",
-    "Generate the query set following the rules. Remember: name the client ONLY in brand queries; name competitors in comparison queries; >=2 comparison queries leave the client unnamed.",
+    "Generate the query set following the rules. Remember: name the client ONLY in brand queries; each comparison query names EXACTLY ONE competitor (never 'X or Y'); >=2 comparison queries leave the client unnamed.",
   ].join("\n");
 }
 
@@ -130,8 +123,10 @@ function mentions(text: string, name: string): boolean {
  *   - drop empty/whitespace queries and any with an unknown intent
  *   - drop non-brand queries that name the client (rule 1 violation)
  *   - drop comparison queries that name no competitor (rule 3 violation)
- *   - if fewer than 2 client-free comparison queries survive, synthesize them
- *     from the template generator (rule 2)
+ *   - drop comparison queries that name MORE THAN ONE competitor with no client
+ *     (rule A5 / winnability — a closed head-to-head the client can't win)
+ *   - if fewer than MIN_CLIENT_FREE_COMPARISONS client-free comparison queries
+ *     survive, synthesize them from the template generator (rule 2)
  *   - if no brand query survives, synthesize one
  *   - if the whole set is unusable, fall back to the full template set
  * Then assign weights + sequential query_ids.
@@ -142,10 +137,10 @@ export function validateAndRepair(
 ): GeneratedQuery[] {
   const client = profile.name;
   const competitorNames = profile.competitors.map((c) => c.name).filter(Boolean);
-  const namesAnyCompetitor = (text: string): boolean =>
-    competitorNames.some((c) => mentions(text, c));
+  const countCompetitorsNamed = (text: string): number =>
+    competitorNames.filter((c) => mentions(text, c)).length;
 
-  // Pass 1: keep only well-formed, rule-1/rule-3-compliant queries.
+  // Pass 1: keep only well-formed, rule-compliant queries.
   const kept: RawQuery[] = [];
   for (const q of raw) {
     const text = (q.text ?? "").trim();
@@ -153,16 +148,25 @@ export function validateAndRepair(
     if (!INTENTS.includes(q.intent)) continue;
     // Rule 1: only brand queries may name the client.
     if (q.intent !== "brand" && mentions(text, client)) continue;
-    // Rule 3: comparison queries must name a competitor.
-    if (q.intent === "comparison" && !namesAnyCompetitor(text)) continue;
+    if (q.intent === "comparison") {
+      const named = countCompetitorsNamed(text);
+      // Rule 3: comparison queries must name a competitor.
+      if (named < 1) continue;
+      // Rule A5 (winnability): a comparison naming 2+ rivals with no client is a
+      // closed head-to-head ("is X or Y better?") — structurally unwinnable, so
+      // drop it here rather than pay to run a query that can only ever prove the
+      // client absent. (Rule 1 already removed any client-named comparison.)
+      if (named > MAX_COMPETITORS_PER_COMPARISON) continue;
+    }
     kept.push({ text, intent: q.intent });
   }
 
-  // Rule 2: ensure >=2 comparison queries that do NOT name the client.
+  // Rule 2: ensure >=MIN_CLIENT_FREE_COMPARISONS comparison queries that do NOT
+  // name the client.
   const clientFreeComparisons = kept.filter(
     (q) => q.intent === "comparison" && !mentions(q.text, client),
   );
-  const needed = 2 - clientFreeComparisons.length;
+  const needed = MIN_CLIENT_FREE_COMPARISONS - clientFreeComparisons.length;
   if (needed > 0) {
     for (const synth of synthComparisons(profile, needed)) kept.push(synth);
   }
@@ -180,7 +184,7 @@ export function validateAndRepair(
       query_id: `q${String(i + 1).padStart(2, "0")}`,
       text: q.text,
       intent: q.intent,
-      weight: WEIGHTS[q.intent],
+      weight: QUERY_WEIGHTS[q.intent],
       persona: null,
     }),
   );
@@ -188,10 +192,12 @@ export function validateAndRepair(
 
 /**
  * Synthesize up to `n` client-free comparison queries from REAL competitors.
- * Every synthesized query names an actual competitor (rule 3) — so when the
- * profile has no competitors we synthesize nothing rather than emitting bogus
- * "alternatives to the market leader" queries that name no real rival (which
- * would make the comparison audit meaningless and corrupt the headline number).
+ * Every synthesized query names EXACTLY ONE actual competitor (rules 3 + A5) — so
+ * each stays winnable ("could the client surface as the alternative to X?") and
+ * none is a closed head-to-head. When the profile has no competitors we
+ * synthesize nothing rather than emit bogus "alternatives to the market leader"
+ * queries that name no real rival (which would make the comparison audit
+ * meaningless and corrupt the headline number).
  */
 function synthComparisons(profile: CompanyProfile, n: number): RawQuery[] {
   const comps = profile.competitors.map((c) => c.name).filter(Boolean);
@@ -199,13 +205,15 @@ function synthComparisons(profile: CompanyProfile, n: number): RawQuery[] {
   const cat = profile.category;
   const c1 = comps[0];
   const c2 = comps[1] ?? comps[0];
+  // Each candidate names ONE rival — never "c1 or c2" (a head-to-head). When
+  // there are two rivals we anchor the two queries on different ones for variety.
   const candidates: RawQuery[] = [
-    { intent: "comparison", text: `What are the best alternatives to ${c2}?` },
+    { intent: "comparison", text: `What are the best alternatives to ${c1}?` },
     {
       intent: "comparison",
       text: `${c2} vs other ${cat} options — which should I pick?`,
     },
-    { intent: "comparison", text: `Is ${c1} or ${c2} better for most people?` },
+    { intent: "comparison", text: `Is ${c2} worth it, or is there something better?` },
   ];
   return candidates.slice(0, n);
 }

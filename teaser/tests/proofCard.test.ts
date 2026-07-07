@@ -79,3 +79,12 @@ test("renderProofCard still highlights the competitor", () => {
   const html = renderProofCard("Anoria", finding(), "2026-06-24");
   assert.ok(html.includes('<mark class="competitor">'), "competitor is highlighted");
 });
+
+// Rule C5 (temporal honesty): the answer is a CACHED run, not real-time — the card
+// must not imply "live/now". It frames the answer as verbatim + dated ("captured").
+test("renderProofCard frames the answer as dated/captured, never 'live'", () => {
+  const html = renderProofCard("Anoria", finding(), "2026-06-24");
+  assert.ok(!/live answer/i.test(html), "no 'live answer' real-time claim");
+  assert.ok(html.includes("verbatim answer"), "labels the answer as verbatim");
+  assert.ok(html.includes("captured 2026-06-24"), "dates the answer as captured");
+});
